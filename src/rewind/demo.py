@@ -1,27 +1,30 @@
-"""Scripted incident-response demo agent for the Time-Travel Dashboard.
+"""Scripted incident-response demo for the Time-Travel Dashboard.
 
-Runs the PRD hero storyboard as a background thread so the dashboard's tree
-graph grows live:
+Stateless by design: all progress is derived from the database, so any
+process — a laptop dev server or one of several AWS Lambda instances — can
+advance the storyboard by calling ``tick()``. The dashboard's poll loop is
+the clock; no threads, no in-memory registries.
+
+Storyboard (the PRD hero flow):
 
 1. Steps 1-2: healthy triage and hypothesis (the last clean checkpoint).
 2. Steps 3-6: a poisoned belief compounds; three Slack messages are staged;
    the run ends in ``status: failed`` and the agent stops.
-3. The thread then waits for the operator to rewind (the poisoned branch
-   becomes abandoned). When a fresh branch appears, the agent resumes on it
-   with the corrected diagnosis and resolves the incident.
-
-Every step is a real checkpoint commit through the same public APIs the SDK
-exposes — the demo exercises the actual system, not a mock of it.
+3. The operator rewinds (the poisoned branch becomes abandoned). The agent
+   resumes on the fresh branch with the corrected diagnosis, resolves the
+   incident, and flushes the one correct Slack message.
 """
 
 from __future__ import annotations
 
-import threading
 import time
+from datetime import UTC, datetime
 
 from rewind.memory import VectorMemory
 from rewind.proxy import ToolProxy
 from rewind.store import RewindStore
+
+DEMO_RUN_PREFIX = "incident-"
 
 POISONED_STEPS = [
     dict(
@@ -77,75 +80,75 @@ RECOVERY_STEPS = [
 ]
 
 
-class IncidentDemo:
-    """Drives the scripted incident via lazy ticks.
+def _slack_executor(payload: dict) -> dict:
+    return {"ok": True, "sent": payload["text"]}
 
-    No background threads: callers (the dashboard's poll loop via the API)
-    call ``tick()``, and a step is applied when its interval has elapsed.
-    This works identically on a laptop and on freeze/thaw runtimes like AWS
-    Lambda, where a daemon thread would stall between requests.
+
+def start(store: RewindStore) -> str:
+    """Create a fresh demo run; ticks advance it from there."""
+    run = store.create_run(f"{DEMO_RUN_PREFIX}{time.strftime('%H%M%S')}")
+    return run.id
+
+
+def is_demo_run(run_name: str) -> bool:
+    return run_name.startswith(DEMO_RUN_PREFIX)
+
+
+def _seconds_since(iso_timestamp: str) -> float:
+    then = datetime.fromisoformat(iso_timestamp)
+    return (datetime.now(UTC) - then).total_seconds()
+
+
+def _apply(store: RewindStore, branch_id: str, step: dict) -> None:
+    store.create_checkpoint(
+        branch_id,
+        updates=step.get("updates"),
+        files=step.get("files"),
+        label=step["label"],
+    )
+    if step.get("memory"):
+        VectorMemory(store).remember(branch_id, step["memory"])
+    if step.get("slack"):
+        ToolProxy(store).call(branch_id, "slack.post", {"text": step["slack"]}, mode="staged")
+
+
+def tick(store: RewindStore, run_id: str, interval: float = 2.0) -> None:
+    """Advance the storyboard one step if its time has come.
+
+    Progress is read from the tree itself: which branch is active, how many
+    steps beyond genesis (or beyond the fork point) exist, and when the head
+    was committed. Safe to call from any number of concurrent processes —
+    the worst case is two processes applying the same step, which the demo
+    tolerates (steps are idempotent-ish labels on an append-only tree).
     """
+    run = store.get_run(run_id)
+    if not is_demo_run(run.name):
+        return
+    branches = store.list_branches(run_id)
+    active = store.active_branch(run_id)
+    head = store.get_checkpoint(active.head_checkpoint_id)
 
-    def __init__(self, store: RewindStore, interval: float = 2.0) -> None:
-        self.store = store
-        self.interval = interval
-        self.memory = VectorMemory(store)
-        self.sent: list[dict] = []
-        self.proxy = ToolProxy(
-            store, executors={"slack.post": lambda p: self.sent.append(p) or {"ok": True}}
-        )
-        self.run_id: str | None = None
-        self._poisoned_branch_id: str | None = None
-        self._next_step = 0
-        self._phase = "poisoned"  # -> 'awaiting_rewind' -> 'recovery' -> 'done'
-        self._last_step_at = 0.0
-        self._lock = threading.Lock()
+    on_original_branch = active.id == branches[0].id
+    if on_original_branch:
+        steps_applied = head.step_index
+        if steps_applied >= len(POISONED_STEPS):
+            return  # failed; awaiting the operator's rewind
+        if _seconds_since(head.created_at) < interval:
+            return
+        _apply(store, active.id, POISONED_STEPS[steps_applied])
+        return
 
-    def start(self) -> str:
-        run = self.store.create_run(f"incident-{time.strftime('%H%M%S')}")
-        self.run_id = run.id
-        self._poisoned_branch_id = self.store.active_branch(run.id).id
-        self._last_step_at = time.monotonic()
-        return run.id
+    fork = store.get_checkpoint(active.forked_from_checkpoint_id)
+    steps_applied = head.step_index - fork.step_index
+    if steps_applied >= len(RECOVERY_STEPS):
+        return  # resolved
+    if _seconds_since(head.created_at) < interval:
+        return
+    _apply(store, active.id, RECOVERY_STEPS[steps_applied])
+    if steps_applied + 1 >= len(RECOVERY_STEPS):
+        ToolProxy(store, executors={"slack.post": _slack_executor}).flush(active.id)
 
-    def _apply(self, branch_id: str, step: dict) -> None:
-        self.store.create_checkpoint(
-            branch_id,
-            updates=step.get("updates"),
-            files=step.get("files"),
-            label=step["label"],
-        )
-        if step.get("memory"):
-            self.memory.remember(branch_id, step["memory"])
-        if step.get("slack"):
-            self.proxy.call(branch_id, "slack.post", {"text": step["slack"]}, mode="staged")
 
-    def tick(self) -> None:
-        """Advance the storyboard if the current step's time has come."""
-        with self._lock:
-            if self.run_id is None or self._phase == "done":
-                return
-
-            active = self.store.active_branch(self.run_id)
-            if self._phase == "awaiting_rewind":
-                if active.id != self._poisoned_branch_id:
-                    self._phase = "recovery"
-                    self._next_step = 0
-                    self._last_step_at = time.monotonic()
-                return
-
-            if time.monotonic() - self._last_step_at < self.interval:
-                return
-            self._last_step_at = time.monotonic()
-
-            if self._phase == "poisoned":
-                self._apply(active.id, POISONED_STEPS[self._next_step])
-                self._next_step += 1
-                if self._next_step >= len(POISONED_STEPS):
-                    self._phase = "awaiting_rewind"
-            elif self._phase == "recovery":
-                self._apply(active.id, RECOVERY_STEPS[self._next_step])
-                self._next_step += 1
-                if self._next_step >= len(RECOVERY_STEPS):
-                    self.proxy.flush(active.id)
-                    self._phase = "done"
+def sent_messages(store: RewindStore, run_id: str) -> list[dict]:
+    """Messages that actually left the sandbox (committed staged effects)."""
+    return [e.payload for e in store.list_effects(run_id, status="committed") if e.mode == "staged"]

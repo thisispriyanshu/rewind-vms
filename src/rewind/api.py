@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from rewind.demo import IncidentDemo
+from rewind import demo as demo_mod
 from rewind.env import load_dotenv
 from rewind.proxy import ToolProxy
 from rewind.store import RewindStore
@@ -54,7 +54,6 @@ def create_app(store: RewindStore | None = None) -> FastAPI:
         load_dotenv()
         store = RewindStore.open(os.environ.get("REWIND_DATABASE_URL", "sqlite:///rewind.db"))
     proxy = ToolProxy(store)
-    demos: dict[str, IncidentDemo] = {}
     app = FastAPI(title="Rewind", description="Version control for AI agents")
     app.add_middleware(
         CORSMiddleware,
@@ -73,10 +72,10 @@ def create_app(store: RewindStore | None = None) -> FastAPI:
 
     @app.get("/api/runs/{run_id}/tree")
     def get_tree(run_id: str) -> dict[str, Any]:
-        # The dashboard's poll doubles as the demo clock (Lambda-safe).
-        if run_id in demos:
-            demos[run_id].tick()
         try:
+            # The dashboard's poll doubles as the demo clock (stateless,
+            # so any process/Lambda instance can advance the storyboard).
+            demo_mod.tick(store, run_id)
             return store.get_tree(run_id)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
@@ -131,16 +130,15 @@ def create_app(store: RewindStore | None = None) -> FastAPI:
 
     @app.post("/api/demo/start")
     def start_demo(req: DemoStartRequest) -> dict[str, Any]:
-        demo = IncidentDemo(store, interval=req.interval)
-        run_id = demo.start()
-        demos[run_id] = demo
-        return {"run_id": run_id}
+        return {"run_id": demo_mod.start(store)}
 
     @app.get("/api/demo/{run_id}/sent")
     def demo_sent(run_id: str) -> list[dict[str, Any]]:
         """Messages that actually left the sandbox (flushed after recovery)."""
-        demo = demos.get(run_id)
-        return demo.sent if demo else []
+        try:
+            return demo_mod.sent_messages(store, run_id)
+        except KeyError:
+            return []
 
     return app
 
