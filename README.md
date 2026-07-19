@@ -23,8 +23,7 @@ Backed by [CockroachDB](https://www.cockroachlabs.com/) in production
 (`AS OF SYSTEM TIME` time-travel reads, serializable transactions, distributed vector
 indexing), with a zero-setup SQLite backend for local development.
 
-> 🏗️ **Status: early development.** Built for the CockroachDB × AWS
-> *"Build with Agentic Memory"* hackathon, designed to outlive it.
+> 🏗️ **Status: early development.** APIs may change while the core settles.
 
 ## How it works
 
@@ -129,13 +128,51 @@ examples/      Runnable walkthroughs of the hero flow
 dashboard/     React Time-Travel Dashboard
 ```
 
-## Hackathon
+## Architecture
 
-Built for the CockroachDB × AWS *"Build with Agentic Memory"* hackathon.
-[docs/hackathon.md](docs/hackathon.md) details exactly which CockroachDB tools
-(Distributed Vector Indexing, Managed MCP Server) and AWS services (Bedrock,
-Lambda) the agent uses and what it does with them, plus the architecture
-diagram.
+```mermaid
+flowchart TB
+    subgraph UI["Agent Time-Travel Dashboard (React)"]
+        TREE["Tree graph · diff view · Rewind button · discard toast"]
+    end
+    subgraph INT["Rewind Interceptor (Python SDK)"]
+        CKPT["Checkpointer\n(LangGraph RewindSaver)"]
+        STORE["Versioned State Store + VFS"]
+        PROXY["Idempotent Tool Proxy\nstaged / idempotent / dry-run"]
+        MEM["Vector Memory manager"]
+    end
+    AGENT["LangGraph agent\n(LLM via Amazon Bedrock)"] --> CKPT
+    UI -->|checkpoint / branch / rewind API| INT
+    MCP["Claude Code / Cursor\nvia managed MCP server"] -.->|read-only, audited| CRDB
+    CKPT --> STORE
+    STORE --> CRDB[("CockroachDB\nversioned KV · VFS metadata\nVECTOR index · staged effects\nAS OF SYSTEM TIME")]
+    PROXY --> CRDB
+    MEM --> CRDB
+    MEM -->|Titan embeddings| BR["Amazon Bedrock"]
+    STORE -.->|large blobs| S3[("Amazon S3")]
+```
+
+Database features doing the heavy lifting:
+
+- **`AS OF SYSTEM TIME`** (CockroachDB) — instant historical reads power the
+  "state as it was before the bad write" view.
+- **Serializable transactions** — each checkpoint commit moves state deltas,
+  VFS writes, memory, and staged-effect metadata atomically.
+- **Distributed vector indexing** — semantic recall runs inside the database
+  (`embedding <=> query`), scoped to the checkpoint lineage, so rewinding
+  also rewinds what the agent can remember.
+- **Append-only versioned model** — rewind forks a branch; nothing is ever
+  deleted, so the audit trail and tree view always have full history.
+
+## Deployment
+
+One command packages the API, dashboard, and dependencies into an AWS Lambda
+with a public function URL (CockroachDB holds all state):
+
+```bash
+cd dashboard && npm run build && cd ..
+python deploy/deploy.py
+```
 
 ## Contributing
 

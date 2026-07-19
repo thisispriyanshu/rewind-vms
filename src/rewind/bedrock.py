@@ -1,7 +1,7 @@
 """Amazon Bedrock adapters: the LLM and embedder the demo agent plugs in.
 
-Rewind itself is model-agnostic — these are the production-grade defaults for
-the hackathon build. ``TitanEmbedder`` produces 256-dim embeddings matching
+Rewind itself is model-agnostic — these are the production-grade defaults.
+``TitanEmbedder`` produces 256-dim embeddings matching
 the CockroachDB vector index; ``BedrockLLM`` wraps the Converse API for the
 incident-response agent.
 
