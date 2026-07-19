@@ -81,6 +81,8 @@ def main() -> None:
     recovery = result.new_branch
     print(f"\n▶ resuming on branch {recovery.name!r}")
     print(f"  state: {store.get_state(recovery.head_checkpoint_id)}")
+    plan = vfs.read_text(recovery.head_checkpoint_id, "/notes/plan.md")
+    print(f"  /notes/plan.md restored to:\n    {plan.strip().replace(chr(10), chr(10) + '    ')}")
     recalled = memory.recall_on_branch(recovery.id, "what do we know about db-3", k=3)
     print("  memory after rewind (poisoned conclusion is gone):")
     for hit in recalled:
