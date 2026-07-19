@@ -1,5 +1,8 @@
 # Rewind
 
+[![CI](https://github.com/thisispriyanshu/rewind-vms/actions/workflows/ci.yml/badge.svg)](https://github.com/thisispriyanshu/rewind-vms/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **Version control and a staging environment for AI agents.**
 
 Deploying AI agents today is like letting a developer push straight to production with
@@ -69,8 +72,33 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The SDK runs against SQLite out of the box. Point `REWIND_DATABASE_URL` at a
-CockroachDB (or any PostgreSQL wire-compatible) cluster for production features.
+The SDK runs against SQLite out of the box. Try the full hero flow offline:
+
+```bash
+python examples/incident_demo.py
+```
+
+## Connecting CockroachDB
+
+Production features (`AS OF SYSTEM TIME` time travel, distributed vector
+indexing, serializable checkpoint commits) come from CockroachDB. Copy
+`.env.example` to `.env` and set:
+
+```
+REWIND_DATABASE_URL=postgresql://USER:PASSWORD@HOST:26257/defaultdb?sslmode=verify-full
+```
+
+For CockroachDB Cloud, install the cluster CA certificate first (from the
+console's *Connect* dialog):
+
+```bash
+curl --create-dirs -o "$HOME/.postgresql/root.crt" \
+  "https://cockroachlabs.cloud/clusters/<CLUSTER-ID>/cert"
+# Windows: save to %APPDATA%\postgresql\root.crt
+```
+
+With `REWIND_DATABASE_URL` set, `pytest` additionally runs the live-cluster
+integration tests (hero flow, idempotent replay, `AS OF SYSTEM TIME` reads).
 
 ## Project layout
 
