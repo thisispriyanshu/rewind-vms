@@ -73,6 +73,9 @@ def create_app(store: RewindStore | None = None) -> FastAPI:
 
     @app.get("/api/runs/{run_id}/tree")
     def get_tree(run_id: str) -> dict[str, Any]:
+        # The dashboard's poll doubles as the demo clock (Lambda-safe).
+        if run_id in demos:
+            demos[run_id].tick()
         try:
             return store.get_tree(run_id)
         except KeyError as exc:

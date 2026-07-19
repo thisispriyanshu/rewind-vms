@@ -78,7 +78,13 @@ RECOVERY_STEPS = [
 
 
 class IncidentDemo:
-    """Drives the scripted incident in a daemon thread."""
+    """Drives the scripted incident via lazy ticks.
+
+    No background threads: callers (the dashboard's poll loop via the API)
+    call ``tick()``, and a step is applied when its interval has elapsed.
+    This works identically on a laptop and on freeze/thaw runtimes like AWS
+    Lambda, where a daemon thread would stall between requests.
+    """
 
     def __init__(self, store: RewindStore, interval: float = 2.0) -> None:
         self.store = store
@@ -89,13 +95,17 @@ class IncidentDemo:
             store, executors={"slack.post": lambda p: self.sent.append(p) or {"ok": True}}
         )
         self.run_id: str | None = None
-        self._thread: threading.Thread | None = None
+        self._poisoned_branch_id: str | None = None
+        self._next_step = 0
+        self._phase = "poisoned"  # -> 'awaiting_rewind' -> 'recovery' -> 'done'
+        self._last_step_at = 0.0
+        self._lock = threading.Lock()
 
     def start(self) -> str:
         run = self.store.create_run(f"incident-{time.strftime('%H%M%S')}")
         self.run_id = run.id
-        self._thread = threading.Thread(target=self._drive, daemon=True)
-        self._thread.start()
+        self._poisoned_branch_id = self.store.active_branch(run.id).id
+        self._last_step_at = time.monotonic()
         return run.id
 
     def _apply(self, branch_id: str, step: dict) -> None:
@@ -110,21 +120,32 @@ class IncidentDemo:
         if step.get("slack"):
             self.proxy.call(branch_id, "slack.post", {"text": step["slack"]}, mode="staged")
 
-    def _drive(self) -> None:
-        assert self.run_id is not None
-        poisoned = self.store.active_branch(self.run_id)
-        for step in POISONED_STEPS:
-            time.sleep(self.interval)
-            self._apply(poisoned.id, step)
+    def tick(self) -> None:
+        """Advance the storyboard if the current step's time has come."""
+        with self._lock:
+            if self.run_id is None or self._phase == "done":
+                return
 
-        # Failed. Wait for the operator to rewind (a new active branch appears).
-        while True:
-            time.sleep(1.0)
             active = self.store.active_branch(self.run_id)
-            if active.id != poisoned.id:
-                break
+            if self._phase == "awaiting_rewind":
+                if active.id != self._poisoned_branch_id:
+                    self._phase = "recovery"
+                    self._next_step = 0
+                    self._last_step_at = time.monotonic()
+                return
 
-        for step in RECOVERY_STEPS:
-            time.sleep(self.interval)
-            self._apply(active.id, step)
-        self.proxy.flush(active.id)
+            if time.monotonic() - self._last_step_at < self.interval:
+                return
+            self._last_step_at = time.monotonic()
+
+            if self._phase == "poisoned":
+                self._apply(active.id, POISONED_STEPS[self._next_step])
+                self._next_step += 1
+                if self._next_step >= len(POISONED_STEPS):
+                    self._phase = "awaiting_rewind"
+            elif self._phase == "recovery":
+                self._apply(active.id, RECOVERY_STEPS[self._next_step])
+                self._next_step += 1
+                if self._next_step >= len(RECOVERY_STEPS):
+                    self.proxy.flush(active.id)
+                    self._phase = "done"
