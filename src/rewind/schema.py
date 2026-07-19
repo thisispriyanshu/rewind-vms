@@ -102,7 +102,15 @@ DDL = [
 ]
 
 
+def ddl_for(dialect: str) -> list[str]:
+    """The DDL is written in the SQLite/portable subset; BLOB is the only
+    type name that differs on PostgreSQL/CockroachDB (BYTEA)."""
+    if dialect == "postgres":
+        return [s.replace("BLOB", "BYTEA") for s in DDL]
+    return list(DDL)
+
+
 def create_schema(db: Database) -> None:
     with db.transaction():
-        for statement in DDL:
+        for statement in ddl_for(db.dialect):
             db.execute(statement)
