@@ -140,8 +140,13 @@ class RewindStore:
         updates: Mapping[str, Any] | None = None,
         deletes: Iterable[str] = (),
         label: str | None = None,
+        files: Mapping[str, bytes | None] | None = None,
     ) -> Checkpoint:
-        """Commit one step: a new checkpoint plus its state deltas, atomically."""
+        """Commit one step: a new checkpoint plus its state deltas, atomically.
+
+        ``files`` maps VFS paths to content; a ``None`` content deletes the
+        path (as a tombstone row — history stays readable at old checkpoints).
+        """
         with self.db.transaction():
             branch = self.get_branch(branch_id)
             if branch.status != "active":
@@ -179,6 +184,21 @@ class RewindStore:
                     "INSERT INTO state_kv (id, run_id, branch_id, checkpoint_id, key, value,"
                     " tombstone) VALUES (?, ?, ?, ?, ?, NULL, 1)",
                     (_uid(), ckpt.run_id, branch_id, ckpt.id, key),
+                )
+            for path, content in (files or {}).items():
+                self.db.execute(
+                    "INSERT INTO vfs_objects (id, run_id, branch_id, checkpoint_id, path,"
+                    " content, blob_ref, size, tombstone) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+                    (
+                        _uid(),
+                        ckpt.run_id,
+                        branch_id,
+                        ckpt.id,
+                        path,
+                        content,
+                        len(content) if content is not None else 0,
+                        0 if content is not None else 1,
+                    ),
                 )
             self.db.execute(
                 "UPDATE branches SET head_checkpoint_id = ? WHERE id = ?", (ckpt.id, branch_id)
