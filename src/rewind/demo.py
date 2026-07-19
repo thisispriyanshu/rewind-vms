@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 
 from rewind.memory import VectorMemory
 from rewind.proxy import ToolProxy
-from rewind.store import RewindStore
+from rewind.store import RewindStore, StaleHeadError
 
 DEMO_RUN_PREFIX = "incident-"
 
@@ -99,17 +99,24 @@ def _seconds_since(iso_timestamp: str) -> float:
     return (datetime.now(UTC) - then).total_seconds()
 
 
-def _apply(store: RewindStore, branch_id: str, step: dict) -> None:
-    store.create_checkpoint(
-        branch_id,
-        updates=step.get("updates"),
-        files=step.get("files"),
-        label=step["label"],
-    )
+def _apply(store: RewindStore, branch_id: str, step: dict, expected_head: str) -> bool:
+    """Apply one step guarded by the head we decided from; False if we lost
+    the race to a concurrent ticker (another poll/Lambda applied it first)."""
+    try:
+        store.create_checkpoint(
+            branch_id,
+            updates=step.get("updates"),
+            files=step.get("files"),
+            label=step["label"],
+            expected_head=expected_head,
+        )
+    except StaleHeadError:
+        return False
     if step.get("memory"):
         VectorMemory(store).remember(branch_id, step["memory"])
     if step.get("slack"):
         ToolProxy(store).call(branch_id, "slack.post", {"text": step["slack"]}, mode="staged")
+    return True
 
 
 def tick(store: RewindStore, run_id: str, interval: float = 2.0) -> None:
@@ -135,7 +142,7 @@ def tick(store: RewindStore, run_id: str, interval: float = 2.0) -> None:
             return  # failed; awaiting the operator's rewind
         if _seconds_since(head.created_at) < interval:
             return
-        _apply(store, active.id, POISONED_STEPS[steps_applied])
+        _apply(store, active.id, POISONED_STEPS[steps_applied], expected_head=head.id)
         return
 
     fork = store.get_checkpoint(active.forked_from_checkpoint_id)
@@ -144,7 +151,8 @@ def tick(store: RewindStore, run_id: str, interval: float = 2.0) -> None:
         return  # resolved
     if _seconds_since(head.created_at) < interval:
         return
-    _apply(store, active.id, RECOVERY_STEPS[steps_applied])
+    if not _apply(store, active.id, RECOVERY_STEPS[steps_applied], expected_head=head.id):
+        return
     if steps_applied + 1 >= len(RECOVERY_STEPS):
         ToolProxy(store, executors={"slack.post": _slack_executor}).flush(active.id)
 

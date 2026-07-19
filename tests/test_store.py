@@ -111,6 +111,19 @@ def test_rewind_to_other_run_rejected(store):
         store.rewind(b1.id, head(store, r2))
 
 
+def test_expected_head_guard_rejects_stale_writer(store, run):
+    from rewind.store import StaleHeadError
+
+    branch = store.active_branch(run.id)
+    stale_head = branch.head_checkpoint_id
+    store.create_checkpoint(branch.id, {"x": 1})  # another writer advances head
+
+    with pytest.raises(StaleHeadError):
+        store.create_checkpoint(branch.id, {"x": 2}, expected_head=stale_head)
+    # Without the guard the same write succeeds.
+    store.create_checkpoint(branch.id, {"x": 2})
+
+
 def test_diff_between_checkpoints(store, run):
     branch = store.active_branch(run.id)
     a = store.create_checkpoint(branch.id, {"x": 1, "y": "same", "gone": True})

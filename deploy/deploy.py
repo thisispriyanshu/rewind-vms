@@ -163,17 +163,23 @@ def deploy() -> None:
         print("created function URL")
     except lam.exceptions.ResourceConflictException:
         url_config = lam.get_function_url_config(FunctionName=FUNCTION_NAME)
-    try:
-        lam.add_permission(
-            FunctionName=FUNCTION_NAME,
-            StatementId="public-url",
-            Action="lambda:InvokeFunctionUrl",
-            Principal="*",
-            FunctionUrlAuthType="NONE",
-        )
-    except botocore.exceptions.ClientError as err:
-        if err.response["Error"]["Code"] != "ResourceConflictException":
-            raise
+    # Since Oct 2025, public function URLs need BOTH actions in the policy.
+    # FunctionUrlAuthType may only be set on the InvokeFunctionUrl statement.
+    for statement_id, action, extra in [
+        ("public-url", "lambda:InvokeFunctionUrl", {"FunctionUrlAuthType": "NONE"}),
+        ("public-invoke", "lambda:InvokeFunction", {}),
+    ]:
+        try:
+            lam.add_permission(
+                FunctionName=FUNCTION_NAME,
+                StatementId=statement_id,
+                Action=action,
+                Principal="*",
+                **extra,
+            )
+        except botocore.exceptions.ClientError as err:
+            if err.response["Error"]["Code"] != "ResourceConflictException":
+                raise
 
     print(f"\nDEMO URL: {url_config['FunctionUrl']}")
 

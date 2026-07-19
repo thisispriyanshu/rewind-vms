@@ -27,6 +27,10 @@ from rewind.schema import create_schema
 GENESIS_LABEL = "genesis"
 
 
+class StaleHeadError(RuntimeError):
+    """The branch head moved between reading it and committing a checkpoint."""
+
+
 def _uid() -> str:
     return uuid.uuid4().hex
 
@@ -141,16 +145,22 @@ class RewindStore:
         deletes: Iterable[str] = (),
         label: str | None = None,
         files: Mapping[str, bytes | None] | None = None,
+        expected_head: str | None = None,
     ) -> Checkpoint:
         """Commit one step: a new checkpoint plus its state deltas, atomically.
 
         ``files`` maps VFS paths to content; a ``None`` content deletes the
         path (as a tombstone row — history stays readable at old checkpoints).
+        ``expected_head`` enables optimistic concurrency: if another writer
+        advanced the branch since the caller read it, StaleHeadError is raised
+        instead of appending a duplicate step onto the newer head.
         """
         with self.db.transaction():
             branch = self.get_branch(branch_id)
             if branch.status != "active":
                 raise ValueError(f"branch {branch.name!r} is {branch.status}; cannot checkpoint")
+            if expected_head is not None and branch.head_checkpoint_id != expected_head:
+                raise StaleHeadError(f"branch {branch.name!r} head moved past {expected_head[:8]}")
             parent = self.get_checkpoint(branch.head_checkpoint_id)
             ckpt = Checkpoint(
                 id=_uid(),
