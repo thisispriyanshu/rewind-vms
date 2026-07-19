@@ -129,6 +129,14 @@ examples/      Runnable walkthroughs of the hero flow
 dashboard/     React Time-Travel Dashboard
 ```
 
+## Hackathon
+
+Built for the CockroachDB × AWS *"Build with Agentic Memory"* hackathon.
+[docs/hackathon.md](docs/hackathon.md) details exactly which CockroachDB tools
+(Distributed Vector Indexing, Managed MCP Server) and AWS services (Bedrock,
+Lambda) the agent uses and what it does with them, plus the architecture
+diagram.
+
 ## Contributing
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
