@@ -6,9 +6,9 @@ and ``certs/root.crt`` (the CockroachDB Cloud CA). REWIND_DATABASE_URL comes
 from the function's environment and must reference that cert path.
 """
 
+from fastapi.staticfiles import StaticFiles
 from mangum import Mangum
 
-from fastapi.staticfiles import StaticFiles
 from rewind.api import create_app
 
 app = create_app()
