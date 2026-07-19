@@ -18,6 +18,9 @@ node_modules/
 dashboard/dist/
 *.tsbuildinfo
 
+# Deploy build artifacts
+deploy/_build/
+
 # Local databases & scratch
 *.db
 *.sqlite
