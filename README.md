@@ -78,6 +78,26 @@ The SDK runs against SQLite out of the box. Try the full hero flow offline:
 python examples/incident_demo.py
 ```
 
+## Time-Travel Dashboard
+
+The dashboard renders the checkpoint tree live, diffs any checkpoint against the
+current head, and drives the rewind — including the "N pending Slack messages
+discarded" moment. Two terminals:
+
+```bash
+# API (terminal 1)
+pip install -e ".[api]"
+uvicorn --factory rewind.api:app --port 8000
+
+# Dashboard (terminal 2)
+cd dashboard && npm install && npm run dev   # http://localhost:5173
+```
+
+Click **Start incident demo**: a scripted incident-response agent checkpoints
+every step, poisons its own memory at step 3, and fails at step 6. Select the
+last clean checkpoint, hit **⏪ Rewind & branch here**, and watch the agent
+resume and resolve on the fresh branch.
+
 ## Connecting CockroachDB
 
 Production features (`AS OF SYSTEM TIME` time travel, distributed vector
@@ -103,10 +123,10 @@ integration tests (hero flow, idempotent replay, `AS OF SYSTEM TIME` reads).
 ## Project layout
 
 ```
-src/rewind/    Python SDK — store, VFS, tool proxy, checkpointer
+src/rewind/    Python SDK — store, VFS, tool proxy, memory, API, demo agent
 tests/         Test suite (runs on SQLite, no services needed)
-docs/          Architecture and data-model notes
-dashboard/     React Time-Travel Dashboard (coming soon)
+examples/      Runnable walkthroughs of the hero flow
+dashboard/     React Time-Travel Dashboard
 ```
 
 ## Contributing
