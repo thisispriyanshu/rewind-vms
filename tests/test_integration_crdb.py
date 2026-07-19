@@ -110,6 +110,39 @@ def test_idempotent_replay_on_live_cluster(store):
     assert len(charges) == 1  # charged exactly once across the rewind
 
 
+def test_vector_indexed_recall_on_live_cluster(store):
+    """Semantic recall runs inside CockroachDB via the distributed vector
+    index (cosine distance), and rewinding still rewinds what is recallable."""
+    memory = VectorMemory(store)
+    run = store.create_run("integration-vector")
+    branch = store.active_branch(run.id)
+
+    clean = store.create_checkpoint(branch.id, {"step": 1})
+    memory.remember(branch.id, "db-3 connection pool is at 98 percent utilization")
+    memory.remember(branch.id, "customer emailed asking about the quarterly invoice")
+
+    store.create_checkpoint(branch.id, {"step": 2})
+    memory.remember(branch.id, "conclusion: db-3 disk corruption, wipe required")
+
+    # The DB-side ANN search must rank pool memory above billing memory.
+    hits = memory._recall_indexed(
+        store.get_branch(branch.id).head_checkpoint_id,
+        memory.embedder("why is the database connection pool exhausted"),
+        k=2,
+    )
+    assert hits, "vector index query returned no rows"
+    assert "connection pool" in hits[0].record.content
+
+    # After a rewind, the poisoned memory is out of ANN reach on the new branch.
+    new_branch = store.rewind(branch.id, clean.id).new_branch
+    contents = [
+        h.record.content
+        for h in memory.recall(new_branch.head_checkpoint_id, "what about db-3", k=5)
+    ]
+    assert all("wipe" not in c for c in contents)
+    assert any("connection pool" in c for c in contents)
+
+
 def test_as_of_system_time_reads(store):
     """CockroachDB MVCC time travel: read the DB exactly as it was earlier."""
     if store.db.dialect != "postgres":

@@ -21,6 +21,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from rewind.schema import EMBEDDING_DIM
 from rewind.store import RewindStore, _now, _uid
 
 Embedder = Callable[[str], list[float]]
@@ -33,7 +34,7 @@ class HashingEmbedder:
     similarity, which is enough for offline tests and demos.
     """
 
-    def __init__(self, dim: int = 256) -> None:
+    def __init__(self, dim: int = EMBEDDING_DIM) -> None:
         self.dim = dim
 
     def __call__(self, text: str) -> list[float]:
@@ -88,9 +89,12 @@ class VectorMemory:
             embedding=self.embedder(content),
             created_at=_now(),
         )
+        # json.dumps of a float list is also valid CockroachDB VECTOR literal
+        # syntax; the explicit cast makes the intent unambiguous there.
+        embedding_expr = "?::VECTOR" if self.store.db.dialect == "postgres" else "?"
         self.store.db.execute(
             "INSERT INTO agent_memory (id, run_id, branch_id, checkpoint_id, content,"
-            " embedding, tombstone, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+            f" embedding, tombstone, created_at) VALUES (?, ?, ?, ?, ?, {embedding_expr}, 0, ?)",
             (
                 record.id,
                 record.run_id,
@@ -129,15 +133,59 @@ class VectorMemory:
     def recall(self, checkpoint_id: str, query: str, k: int = 5) -> list[RecallHit]:
         """Semantic recall as of a checkpoint — the agent's memory *at that time*.
 
-        Local backend: in-process cosine over the lineage. On CockroachDB this
-        becomes a vector-index query filtered by the same lineage.
+        On CockroachDB the search runs in the database against the distributed
+        vector index (cosine distance, ``<=>``), then results are scoped to
+        the checkpoint's lineage so a rewind also rewinds what is recallable.
+        Local SQLite backend falls back to in-process cosine.
         """
         query_vec = self.embedder(query)
+        if self.store.db.dialect == "postgres":
+            try:
+                return self._recall_indexed(checkpoint_id, query_vec, k)
+            except Exception:  # noqa: BLE001 - e.g. vanilla Postgres without vectors
+                pass
         hits = [
             RecallHit(record=m, score=cosine(query_vec, m.embedding))
             for m in self.memories_at(checkpoint_id)
         ]
         hits.sort(key=lambda h: h.score, reverse=True)
+        return hits[:k]
+
+    def _recall_indexed(
+        self, checkpoint_id: str, query_vec: list[float], k: int
+    ) -> list[RecallHit]:
+        """ANN search in CockroachDB, post-filtered to the exact lineage.
+
+        The vector index is prefixed by run_id, so the ANN search stays inside
+        this run; we over-fetch, then keep only memories on the checkpoint's
+        ancestor chain (abandoned-branch memories must not leak back in).
+        """
+        chain = self.store.lineage(checkpoint_id)
+        keep = {c.id for c in chain}
+        run_id = chain[-1].run_id
+        rows = self.store.db.query(
+            "SELECT id, run_id, branch_id, checkpoint_id, content, embedding, created_at,"
+            " embedding <=> ?::VECTOR AS distance"
+            " FROM agent_memory WHERE run_id = ? AND tombstone = 0"
+            " ORDER BY embedding <=> ?::VECTOR LIMIT ?",
+            (json.dumps(query_vec), run_id, json.dumps(query_vec), max(k * 8, 32)),
+        )
+        hits = [
+            RecallHit(
+                record=MemoryRecord(
+                    id=r[0],
+                    run_id=r[1],
+                    branch_id=r[2],
+                    checkpoint_id=r[3],
+                    content=r[4],
+                    embedding=json.loads(r[5]),
+                    created_at=r[6],
+                ),
+                score=1.0 - float(r[7]),
+            )
+            for r in rows
+            if r[3] in keep
+        ]
         return hits[:k]
 
     def recall_on_branch(self, branch_id: str, query: str, k: int = 5) -> list[RecallHit]:

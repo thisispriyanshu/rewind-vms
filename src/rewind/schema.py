@@ -73,7 +73,7 @@ DDL = [
         branch_id     TEXT NOT NULL,
         checkpoint_id TEXT NOT NULL REFERENCES checkpoints(id),
         content       TEXT NOT NULL,
-        embedding     TEXT,
+        embedding     EMBEDDING_TYPE,
         tombstone     INTEGER NOT NULL DEFAULT 0,
         created_at    TEXT NOT NULL
     )
@@ -102,15 +102,38 @@ DDL = [
 ]
 
 
+# Dimension shared by every embedder (HashingEmbedder locally; Titan V2 on
+# Bedrock also supports 256). A fixed dimension is what makes the CockroachDB
+# vector index possible.
+EMBEDDING_DIM = 256
+
+# Best-effort statements: real gains when they apply, harmless to skip where
+# unsupported (e.g. a vanilla PostgreSQL without vector support).
+OPTIONAL_DDL_POSTGRES = [
+    "CREATE VECTOR INDEX IF NOT EXISTS idx_memory_embedding ON agent_memory (run_id, embedding)",
+]
+
+
 def ddl_for(dialect: str) -> list[str]:
-    """The DDL is written in the SQLite/portable subset; BLOB is the only
-    type name that differs on PostgreSQL/CockroachDB (BYTEA)."""
+    """The DDL is written in the SQLite/portable subset. Per-dialect types:
+    BLOB becomes BYTEA on PostgreSQL/CockroachDB, and the memory embedding is
+    a real VECTOR column there (JSON text on SQLite)."""
     if dialect == "postgres":
-        return [s.replace("BLOB", "BYTEA") for s in DDL]
-    return list(DDL)
+        return [
+            s.replace("BLOB", "BYTEA").replace("EMBEDDING_TYPE", f"VECTOR({EMBEDDING_DIM})")
+            for s in DDL
+        ]
+    return [s.replace("EMBEDDING_TYPE", "TEXT") for s in DDL]
 
 
 def create_schema(db: Database) -> None:
-    with db.transaction():
-        for statement in ddl_for(db.dialect):
-            db.execute(statement)
+    # Statements run individually: CockroachDB dislikes DDL inside explicit
+    # transactions, and every statement is IF NOT EXISTS anyway.
+    for statement in ddl_for(db.dialect):
+        db.execute(statement)
+    if db.dialect == "postgres":
+        for statement in OPTIONAL_DDL_POSTGRES:
+            try:
+                db.execute(statement)
+            except Exception:  # noqa: BLE001 - vector indexing is an enhancement
+                pass
