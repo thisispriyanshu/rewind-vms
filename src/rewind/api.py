@@ -14,11 +14,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from rewind.demo import IncidentDemo
+from rewind.env import load_dotenv
 from rewind.proxy import ToolProxy
 from rewind.store import RewindStore
 
 try:
     from fastapi import FastAPI, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
@@ -42,11 +45,23 @@ class CheckpointRequest(BaseModel):
     label: str | None = None
 
 
+class DemoStartRequest(BaseModel):
+    interval: float = 2.0
+
+
 def create_app(store: RewindStore | None = None) -> FastAPI:
     if store is None:
+        load_dotenv()
         store = RewindStore.open(os.environ.get("REWIND_DATABASE_URL", "sqlite:///rewind.db"))
     proxy = ToolProxy(store)
+    demos: dict[str, IncidentDemo] = {}
     app = FastAPI(title="Rewind", description="Version control for AI agents")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/api/runs")
     def list_runs() -> list[dict[str, Any]]:
@@ -110,6 +125,19 @@ def create_app(store: RewindStore | None = None) -> FastAPI:
             "discarded_effects": [e.__dict__ for e in result.discarded_effects],
             "discarded_count": len(result.discarded_effects),
         }
+
+    @app.post("/api/demo/start")
+    def start_demo(req: DemoStartRequest) -> dict[str, Any]:
+        demo = IncidentDemo(store, interval=req.interval)
+        run_id = demo.start()
+        demos[run_id] = demo
+        return {"run_id": run_id}
+
+    @app.get("/api/demo/{run_id}/sent")
+    def demo_sent(run_id: str) -> list[dict[str, Any]]:
+        """Messages that actually left the sandbox (flushed after recovery)."""
+        demo = demos.get(run_id)
+        return demo.sent if demo else []
 
     return app
 
