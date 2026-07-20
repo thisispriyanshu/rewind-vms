@@ -1,15 +1,15 @@
 import React from "react";
 
-const X_STEP = 120;
-const Y_LANE = 96;
-const X0 = 90;
-const Y0 = 70;
-const R = 17;
+const X_STEP = 128;
+const Y_LANE = 92;
+const X0 = 120;
+const Y0 = 62;
+const R = 16;
 
 function nodeColor(ckpt, branch, states) {
   const status = states[ckpt.id]?.status;
   if (branch?.status === "abandoned") {
-    return status === "failed" ? "var(--red)" : "var(--grey)";
+    return status === "failed" ? "var(--red-dim)" : "var(--grey)";
   }
   if (status === "failed") return "var(--red)";
   if (status === "resolved") return "var(--green)";
@@ -29,20 +29,26 @@ export default function TreeGraph({ tree, states, selectedId, onSelect }) {
   });
 
   const width = X0 + (Math.max(0, ...checkpoints.map((c) => c.step_index)) + 1) * X_STEP;
-  const height = Y0 + branches.length * Y_LANE;
+  const height = Y0 + branches.length * Y_LANE - 18;
 
   return (
     <svg
       className="tree"
-      width={Math.max(width, 700)}
-      height={Math.max(height, 240)}
+      width={Math.max(width, 900)}
+      height={Math.max(height, 150)}
       role="img"
       aria-label="Checkpoint tree"
     >
       {branches.map((b, i) => (
-        <text key={b.id} x={12} y={Y0 + i * Y_LANE + 5} className={`lane-label ${b.status}`}>
-          {b.name}
-        </text>
+        <g key={b.id}>
+          <text x={14} y={Y0 + i * Y_LANE - 6} className={`lane-label ${b.status}`}>
+            {b.status === "abandoned" ? "✕ " : "● "}
+            {b.name}
+          </text>
+          <text x={14} y={Y0 + i * Y_LANE + 8} className="lane-sub">
+            {b.status === "abandoned" ? "abandoned timeline" : "active timeline"}
+          </text>
+        </g>
       ))}
 
       {checkpoints.map((c) => {
@@ -62,6 +68,7 @@ export default function TreeGraph({ tree, states, selectedId, onSelect }) {
         const branch = branches.find((b) => b.id === c.branch_id);
         const { x, y } = pos(c);
         const isHead = branch?.head_checkpoint_id === c.id;
+        const failed = states[c.id]?.status === "failed" && branch?.status === "active";
         return (
           <g
             key={c.id}
@@ -70,12 +77,13 @@ export default function TreeGraph({ tree, states, selectedId, onSelect }) {
             onClick={() => onSelect(c.id)}
           >
             {selectedId === c.id && <circle r={R + 6} className="select-ring" />}
+            {failed && <circle r={R + 3} className="fail-glow" fill="none" />}
             <circle r={R} fill={nodeColor(c, branch, states)} />
-            <text y={5} className="node-step">
+            <text y={4.5} className="node-step">
               {c.step_index}
             </text>
-            <text y={R + 16} className="node-label">
-              {(c.label || "").slice(0, 22)}
+            <text y={R + 15} className="node-label">
+              {(c.label || "").slice(0, 24)}
             </text>
             {isHead && branch?.status === "active" && (
               <circle r={R} className="head-pulse" fill="none" />

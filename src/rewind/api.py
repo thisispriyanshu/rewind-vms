@@ -16,8 +16,10 @@ from typing import Any
 
 from rewind import demo as demo_mod
 from rewind.env import load_dotenv
+from rewind.memory import VectorMemory
 from rewind.proxy import ToolProxy
 from rewind.store import RewindStore
+from rewind.vfs import VFS
 
 try:
     from fastapi import FastAPI, HTTPException
@@ -84,6 +86,39 @@ def create_app(store: RewindStore | None = None) -> FastAPI:
     def get_state(checkpoint_id: str) -> dict[str, Any]:
         try:
             return store.get_state(checkpoint_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/checkpoints/{checkpoint_id}/delta")
+    def get_delta(checkpoint_id: str) -> dict[str, Any]:
+        try:
+            return store.get_delta(checkpoint_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/checkpoints/{checkpoint_id}/memories")
+    def get_memories(checkpoint_id: str) -> list[dict[str, Any]]:
+        try:
+            return [
+                {"id": m.id, "content": m.content, "checkpoint_id": m.checkpoint_id}
+                for m in VectorMemory(store).memories_at(checkpoint_id)
+            ]
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.get("/api/checkpoints/{checkpoint_id}/files")
+    def get_files(checkpoint_id: str) -> list[dict[str, Any]]:
+        try:
+            vfs = VFS(store)
+            out = []
+            for f in vfs.list(checkpoint_id):
+                text: str | None
+                try:
+                    text = (f.content or b"").decode("utf-8")[:4000]
+                except UnicodeDecodeError:
+                    text = None
+                out.append({"path": f.path, "size": f.size, "text": text})
+            return out
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
 

@@ -251,6 +251,14 @@ class RewindStore:
     def get_value(self, checkpoint_id: str, key: str, default: Any = None) -> Any:
         return self.get_state(checkpoint_id).get(key, default)
 
+    def get_delta(self, checkpoint_id: str) -> dict[str, Any]:
+        """Only the keys written AT this checkpoint (None marks a delete)."""
+        rows = self.db.query(
+            "SELECT key, value, tombstone FROM state_kv WHERE checkpoint_id = ?",
+            (checkpoint_id,),
+        )
+        return {key: (None if tombstone else json.loads(value)) for key, value, tombstone in rows}
+
     def diff(self, checkpoint_a: str, checkpoint_b: str) -> dict[str, tuple[Any, Any]]:
         """Keys that differ between two checkpoints, as ``key -> (a, b)``."""
         a, b = self.get_state(checkpoint_a), self.get_state(checkpoint_b)

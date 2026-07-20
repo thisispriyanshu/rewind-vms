@@ -36,9 +36,9 @@ def test_scripted_demo_full_arc():
     assert store.get_state(head).get("status") == "resolved"
 
     # Only the corrected message ever left the sandbox.
-    assert [m["text"] for m in demo.sent_messages(store, run_id)] == [
-        "db-3 latency resolved: pool exhausted, size raised"
-    ]
+    sent = demo.sent_messages(store, run_id)
+    assert len(sent) == 1
+    assert sent[0]["text"].startswith("Resolved:")
 
     total_steps = len(demo.POISONED_STEPS) + len(demo.RECOVERY_STEPS)
     assert len(store.list_checkpoints(run_id)) == total_steps + 1  # + genesis

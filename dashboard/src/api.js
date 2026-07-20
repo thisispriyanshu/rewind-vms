@@ -8,9 +8,11 @@ export const api = {
   listRuns: () => request("/api/runs"),
   tree: (runId) => request(`/api/runs/${runId}/tree`),
   state: (checkpointId) => request(`/api/checkpoints/${checkpointId}/state`),
+  delta: (checkpointId) => request(`/api/checkpoints/${checkpointId}/delta`),
+  files: (checkpointId) => request(`/api/checkpoints/${checkpointId}/files`),
+  memories: (checkpointId) => request(`/api/checkpoints/${checkpointId}/memories`),
   diff: (a, b) => request(`/api/diff?a=${a}&b=${b}`),
   pendingEffects: (branchId) => request(`/api/branches/${branchId}/pending-effects`),
-  sentMessages: (runId) => request(`/api/demo/${runId}/sent`),
   rewind: (branchId, toCheckpointId) =>
     request("/api/rewind", {
       method: "POST",

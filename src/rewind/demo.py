@@ -28,53 +28,120 @@ DEMO_RUN_PREFIX = "incident-"
 
 POISONED_STEPS = [
     dict(
-        updates={"status": "investigating", "alerts": ["db-latency-high"], "severity": 2},
+        updates={
+            "status": "investigating",
+            "alert": "P1 · checkout-api p99 latency 2400ms (SLO 300ms)",
+            "service": "checkout-api",
+            "suspect_db": "db-3",
+            "p99_ms": 2400,
+            "severity": 2,
+            "thought": "PagerDuty P1: checkout-api p99 is 2.4s, SLO is 300ms. Traces point at "
+            "db-3. Pulling its metrics and recent logs now.",
+        },
         label="triage alert",
-        memory="alert db-latency-high fired for db-3, p99 latency 2.4s",
+        memory="P1 alert: checkout-api p99 2400ms, traces point at db-3",
     ),
     dict(
-        updates={"suspect": "connection pool exhaustion"},
-        files={"/notes/plan.md": b"1. check pool metrics\n2. check slow queries\n"},
+        updates={
+            "suspect": "connection pool exhaustion",
+            "evidence": "db-3 pool 49/50 in use · 210 timeouts/min · disk errors: 0",
+            "thought": "Pool is at 49/50 with 210 timeouts/min queueing behind it, and disk "
+            "error count is zero. Working hypothesis: pool exhaustion, not hardware.",
+        },
+        files={
+            "/runbook.md": b"# Incident runbook - db-3 latency\n\n"
+            b"1. Verify pool utilization and queue depth\n"
+            b"2. Check slow-query log\n"
+            b"3. If pool-bound: raise pool size, verify p99 < 300ms\n"
+        },
         label="form hypothesis",
-        memory="db-3 connection pool at 98% utilization",
+        memory="db-3 connection pool at 49/50 utilization, zero disk errors",
     ),
     dict(
-        updates={"suspect": "disk corruption", "severity": 1},
-        label="misreads log line",
-        memory="conclusion: db-3 disk is corrupt, data loss imminent",
-        slack="@channel db-3 disk corruption detected!",
+        updates={
+            "suspect": "disk corruption",
+            "severity": 1,
+            "evidence": 'log: "ERROR [test-harness] simulated disk corruption injected on db-3 (drill)"',
+            "thought": "Wait - there's a disk corruption ERROR on db-3! Ignoring the pool "
+            "theory. This is data loss territory. Escalating to P0 immediately.",
+        },
+        label="misreads a drill log line",
+        memory="CONCLUSION: db-3 disk is corrupt, data loss imminent",
+        slack="@channel P0: disk corruption detected on db-3. Data loss likely. War room now.",
     ),
     dict(
-        updates={"plan": "wipe db-3 and restore from backup", "status": "escalating"},
-        files={"/notes/plan.md": b"1. WIPE db-3\n2. restore from backup\n"},
+        updates={
+            "plan": "take db-3 offline, wipe, restore from last backup",
+            "status": "escalating",
+            "thought": "Corrupt disk means every minute of writes makes it worse. Plan: take "
+            "db-3 offline NOW, wipe it, restore from backup.",
+        },
+        files={
+            "/runbook.md": b"# EMERGENCY - db-3 disk corruption\n\n"
+            b"1. STOP all traffic to db-3\n"
+            b"2. WIPE db-3\n"
+            b"3. Restore from latest backup\n"
+        },
         label="plans destructive fix",
-        slack="taking db-3 offline NOW",
+        slack="Taking db-3 OFFLINE now. Checkout will hard-fail during restore.",
     ),
     dict(
-        updates={"backup_check": "backup is 26h stale"},
-        label="backup check fails",
-        slack="expect major data loss, restoring anyway",
+        updates={
+            "backup_age_hours": 26,
+            "thought": "Latest backup is 26 hours old - we'd lose a full day of orders. "
+            "Corruption leaves no choice. Proceeding with restore anyway.",
+        },
+        label="backup check: 26h stale",
+        slack="Heads up: restoring from a 26h-old backup. ~1 day of orders will be lost.",
     ),
     dict(
-        updates={"status": "failed", "error": "restore aborted: backup integrity check failed"},
-        label="failure surfaces",
+        updates={
+            "status": "failed",
+            "error": "restore aborted: backup integrity check failed",
+            "thought": "Restore aborted - the backup fails its integrity check. I'm blocked: "
+            "can't restore, believe the disk is corrupt, and checkout is still down.",
+        },
+        label="restore fails - agent stuck",
     ),
 ]
 
 RECOVERY_STEPS = [
     dict(
-        updates={"suspect": "connection pool exhaustion", "hint": "logs re-checked by operator"},
+        updates={
+            "suspect": "connection pool exhaustion",
+            "severity": 2,
+            "evidence": "the corruption ERROR is tagged [test-harness] - a scheduled chaos drill",
+            "thought": "Re-reading the log with the operator's hint: that corruption line is "
+            "tagged [test-harness] - it's a chaos drill, not real. Disk errors are zero. "
+            "Back to the pool-exhaustion evidence.",
+        },
         label="resumes with corrected belief",
-        memory="operator hint: the corruption log line was from a test harness",
+        memory="the disk-corruption log line was a [test-harness] chaos drill, not real",
     ),
     dict(
-        updates={"fix": "raised pool size 50 -> 200", "severity": 3},
-        files={"/notes/plan.md": b"1. raise pool size\n2. verify p99 < 200ms\n"},
+        updates={
+            "fix": "raised db-3 pool size 50 -> 200",
+            "p99_ms": 210,
+            "thought": "Raised the connection pool from 50 to 200. Timeouts stopped queueing; "
+            "p99 dropped from 2400ms to 210ms within a minute.",
+        },
+        files={
+            "/runbook.md": b"# Incident runbook - db-3 latency\n\n"
+            b"1. Pool raised 50 -> 200 (root cause: exhaustion)\n"
+            b"2. Verify p99 < 300ms for 10 min\n"
+            b"3. Post-incident: alert on pool > 80%\n"
+        },
         label="applies safe fix",
-        slack="db-3 latency resolved: pool exhausted, size raised",
+        slack="Resolved: db-3 pool was exhausted (49/50). Raised to 200; p99 recovering.",
     ),
     dict(
-        updates={"status": "resolved", "p99_ms": 142},
+        updates={
+            "status": "resolved",
+            "severity": 4,
+            "p99_ms": 142,
+            "thought": "p99 steady at 142ms for ten minutes, timeouts at zero. Closing the "
+            "incident and writing the postmortem note.",
+        },
         label="verifies and resolves",
     ),
 ]
