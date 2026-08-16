@@ -11,10 +11,16 @@ Run it:  python examples/incident_demo.py
 
 from __future__ import annotations
 
+import sys
+
 from rewind import RewindStore
 from rewind.memory import VectorMemory
 from rewind.proxy import ToolProxy
 from rewind.vfs import VFS
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 sent_messages: list[dict] = []
 

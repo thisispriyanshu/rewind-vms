@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from "react";
 
-// Keys rendered as chips under a feed card, in priority order.
 const CHIP_KEYS = ["alert", "suspect", "evidence", "plan", "fix", "error", "p99_ms", "backup_age_hours"];
 
 function chipsFor(delta) {
@@ -8,6 +7,10 @@ function chipsFor(delta) {
     key: k,
     value: String(delta[k]),
   }));
+}
+
+function clock(iso) {
+  return new Date(iso).toLocaleTimeString([], { hour12: false });
 }
 
 export default function StepFeed({ tree, deltas, selectedId, onSelect }) {
@@ -34,12 +37,14 @@ export default function StepFeed({ tree, deltas, selectedId, onSelect }) {
   return (
     <div className="panel feed-panel">
       <div className="panel-caption">
-        <span className="caption-title">Agent activity</span>
-        <span className="caption-sub">every step is a checkpoint — click to inspect</span>
+        <div>
+          <span className="caption-title">Agent activity</span>
+          <span className="caption-sub">every step is a checkpoint — click to inspect</span>
+        </div>
       </div>
       <div className="feed-scroll">
         {steps.length === 0 && (
-          <div className="hint-text pad">The agent's reasoning will stream here…</div>
+          <div className="hint-text pad">Waiting for the agent's first checkpoint…</div>
         )}
         {steps.map((c) => {
           const delta = deltas[c.id] || {};
@@ -57,13 +62,14 @@ export default function StepFeed({ tree, deltas, selectedId, onSelect }) {
           return (
             <div key={c.id} className={cls} onClick={() => onSelect(c.id)}>
               <div className="feed-head">
-                <span className="step-no">step {c.step_index}</span>
+                <span className="sha mono">{c.id.slice(0, 8)}</span>
                 <span className="feed-label">{c.label}</span>
                 {abandoned && <span className="tag tag-grey">abandoned</span>}
-                {failed && !abandoned && <span className="tag tag-red">FAILED</span>}
-                {resolved && <span className="tag tag-green">RESOLVED</span>}
+                {failed && !abandoned && <span className="tag tag-red">failed</span>}
+                {resolved && <span className="tag tag-green">resolved</span>}
+                <span className="feed-time mono">{clock(c.created_at)}</span>
               </div>
-              {delta.thought && <div className="thought">“{delta.thought}”</div>}
+              {delta.thought && <div className="thought">{delta.thought}</div>}
               <div className="chips">
                 {chipsFor(delta).map(({ key, value }) => (
                   <span key={key} className={`chip ${key === "error" ? "chip-red" : ""}`}>

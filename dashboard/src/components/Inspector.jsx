@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
 
-const TABS = ["State", "Diff", "Files", "Memory"];
+const TABS = ["State", "Diff", "Files", "Memory", "Integrations"];
 
 function Val({ v }) {
   if (v === null || v === undefined) return <span className="val missing">—</span>;
@@ -44,11 +44,12 @@ export default function Inspector({ tree, selected, headId, onRewind }) {
     return (
       <div className="panel inspector">
         <div className="panel-caption">
-          <span className="caption-title">Time-travel inspector</span>
+          <div>
+            <span className="caption-title">Checkpoint Inspector</span>
+          </div>
         </div>
         <div className="hint-text pad">
-          Click a checkpoint — in the tree or the activity feed — to see the world exactly as
-          the agent saw it at that moment: its state, its files, and what it remembered.
+          Select a checkpoint in the tree or feed to inspect the agent's exact working memory, virtual file system, lineaged vector index, and staged tool proxy side-effects.
         </div>
       </div>
     );
@@ -61,16 +62,18 @@ export default function Inspector({ tree, selected, headId, onRewind }) {
       <div className="panel-caption">
         <div>
           <span className="caption-title">
-            Step {selected.step_index}
-            {selected.label ? ` — ${selected.label}` : ""}
+            <span className="sha mono">{selected.id.slice(0, 8)}</span>
+            {selected.label ? ` ${selected.label}` : ""}
           </span>
           <span className="caption-sub">
-            {new Date(selected.created_at).toLocaleTimeString()}
+            step {selected.step_index} ·{" "}
+            {new Date(selected.created_at).toLocaleTimeString([], { hour12: false })}
+            {selectedId === headId ? " · HEAD" : ""}
           </span>
         </div>
         {canRewind && (
           <button className="rewind-btn" onClick={onRewind}>
-            ⏪ Rewind &amp; branch here
+            Rewind Here…
           </button>
         )}
       </div>
@@ -135,8 +138,8 @@ export default function Inspector({ tree, selected, headId, onRewind }) {
           (files.length > 0 ? (
             files.map((f) => (
               <div key={f.path} className="vfs-file">
-                <div className="vfs-path">
-                  📄 {f.path} <span className="caption-sub">{f.size} B</span>
+                <div className="vfs-path mono">
+                  {f.path} <span className="caption-sub">{f.size} B</span>
                 </div>
                 <pre className="vfs-content">{f.text ?? "(binary)"}</pre>
               </div>
@@ -149,17 +152,58 @@ export default function Inspector({ tree, selected, headId, onRewind }) {
           (memories.length > 0 ? (
             <>
               <div className="diff-note">
-                semantic memories reachable from this checkpoint (vector-indexed in CockroachDB)
+                semantic memories reachable from this checkpoint — vector-indexed in CockroachDB
               </div>
               {memories.map((m) => (
                 <div key={m.id} className="memory-row">
-                  🧠 {m.content}
+                  <span className="sha mono">{m.checkpoint_id.slice(0, 8)}</span> {m.content}
                 </div>
               ))}
             </>
           ) : (
             <div className="hint-text">The agent had formed no memories yet.</div>
           ))}
+
+        {tab === "Integrations" && (
+          <div className="integrations-tab">
+            <div className="integration-box">
+              <div className="box-title">🪳 CockroachDB Distributed Persistence</div>
+              <div className="box-detail">
+                • <b>Table:</b> <code>checkpoints</code> &amp; <code>state_kv</code>
+                <br />
+                • <b>Vector Index:</b> <code>agent_memory (VECTOR(256))</code>
+                <br />
+                • <b>Time-Travel Read:</b> <code>AS OF SYSTEM TIME '{selected.created_at}'</code>
+                <br />
+                • <b>Transaction:</b> Serializable commit lock across state deltas &amp; VFS.
+              </div>
+            </div>
+
+            <div className="integration-box">
+              <div className="box-title">☁️ AWS Cloud Stack</div>
+              <div className="box-detail">
+                • <b>Bedrock LLM:</b> Claude 3.5 Sonnet (Converse API)
+                <br />
+                • <b>Bedrock Embeddings:</b> Amazon Titan Text V2 (256-dim)
+                <br />
+                • <b>Execution Engine:</b> AWS Lambda Public Function URL
+                <br />
+                • <b>Artifact VFS Storage:</b> Amazon S3 Blob Backend
+              </div>
+            </div>
+
+            <div className="integration-box">
+              <div className="box-title">🛡️ Idempotent Tool Proxy</div>
+              <div className="box-detail">
+                • <b>Staging Mode:</b> <code>staged</code> (Sandbox holds side-effects)
+                <br />
+                • <b>Idempotency Key:</b> Stable hash prevents double-firing
+                <br />
+                • <b>Rewind Guard:</b> Unflushed side-effects auto-purged on rewind
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

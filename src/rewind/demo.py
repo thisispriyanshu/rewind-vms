@@ -221,7 +221,15 @@ def tick(store: RewindStore, run_id: str, interval: float = 2.0) -> None:
     if not _apply(store, active.id, RECOVERY_STEPS[steps_applied], expected_head=head.id):
         return
     if steps_applied + 1 >= len(RECOVERY_STEPS):
-        ToolProxy(store, executors={"slack.post": _slack_executor}).flush(active.id)
+        # Flush only what THIS branch authored. Effects staged before the
+        # rewind point survive by design, but re-announcing them is an
+        # operator call — the demo leaves them held rather than firing them.
+        proxy = ToolProxy(store, executors={"slack.post": _slack_executor})
+        own_checkpoints = {c.id for c in store.list_checkpoints(run_id) if c.branch_id == active.id}
+        for effect in proxy.pending(active.id):
+            if effect.checkpoint_id in own_checkpoints:
+                result = proxy._execute(effect.tool_name, effect.payload)
+                store.set_effect_status(effect.id, "committed", result=result)
 
 
 def sent_messages(store: RewindStore, run_id: str) -> list[dict]:

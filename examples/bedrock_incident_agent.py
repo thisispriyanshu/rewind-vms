@@ -17,7 +17,12 @@ from __future__ import annotations
 import json
 import operator
 import os
+import sys
 from typing import Annotated, TypedDict
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 from langgraph.graph import END, START, StateGraph
 

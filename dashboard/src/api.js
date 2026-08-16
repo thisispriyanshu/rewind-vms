@@ -5,6 +5,7 @@ async function request(path, options) {
 }
 
 export const api = {
+  meta: () => request("/api/meta"),
   listRuns: () => request("/api/runs"),
   tree: (runId) => request(`/api/runs/${runId}/tree`),
   state: (checkpointId) => request(`/api/checkpoints/${checkpointId}/state`),

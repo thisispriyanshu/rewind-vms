@@ -174,6 +174,32 @@ cd dashboard && npm run build && cd ..
 python deploy/deploy.py
 ```
 
+## Submission checklist (hackathon)
+
+To make a competitive submission for the CockroachDB × AWS Hackathon, include the
+following in your repository and demo assets:
+
+- Public repo with an open-source license (included: MIT).
+- A working demo URL (see `deploy/deploy.py` for Lambda deployment).
+- A short video (<= 3 minutes) demonstrating the CockroachDB memory layer:
+  - show vector recall, a poisoned step, then a rewind & recovery.
+- Identify which CockroachDB tools you used and how:
+  - Distributed Vector Indexing: implemented in `src/rewind/memory.py` and
+    exercised by the integration tests.
+  - (Optional helper) MCP: helper script `src/rewind/mcp.py` accepts a
+    CockroachDB MCP connection snippet and writes `REWIND_DATABASE_URL` to `.env`.
+- Identify which AWS services you used and how:
+  - Amazon Bedrock: model + embedder adapters in `src/rewind/bedrock.py`.
+  - Amazon S3: VFS blob storage support (S3 read/write helpers) in `src/rewind/vfs.py`.
+  - AWS Lambda: `deploy/deploy.py` packages and deploys the API + dashboard.
+
+Notes:
+- The project runs locally with SQLite for quick demoing (`REWIND_DATABASE_URL=sqlite:///rewind.db`).
+- For a live CockroachDB demo, set `REWIND_DATABASE_URL` to your cluster's URL
+  (see CockroachDB Cloud Connect → MCP snippet), or use `src/rewind/mcp.py` to
+  persist the connection into `.env` for `uvicorn` and `pytest` to pick up.
+
+
 ## Contributing
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).

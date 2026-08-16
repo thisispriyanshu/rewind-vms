@@ -64,6 +64,24 @@ def create_app(store: RewindStore | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.get("/api/meta")
+    def meta() -> dict[str, Any]:
+        """Real backend info for the status bar — never credentials."""
+        if store.db.dialect == "postgres":
+            try:
+                raw = store.db.query("SELECT version()")[0][0]
+                backend = " ".join(raw.split()[:2])  # e.g. "CockroachDB CCL"
+                version = next((t for t in raw.split() if t.startswith("v")), "")
+            except Exception:  # noqa: BLE001
+                backend, version = "PostgreSQL-compatible", ""
+            from urllib.parse import urlsplit
+
+            host = urlsplit(os.environ.get("REWIND_DATABASE_URL", "")).hostname or ""
+            host = host.split(".")[0]
+        else:
+            backend, version, host = "SQLite", "embedded", "local"
+        return {"backend": backend, "version": version, "host": host}
+
     @app.get("/api/runs")
     def list_runs() -> list[dict[str, Any]]:
         return [r.__dict__ for r in store.list_runs()]

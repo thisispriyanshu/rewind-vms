@@ -1,10 +1,14 @@
 import React from "react";
 
 const STATUS_META = {
-  staged: { label: "⏸ HELD by Rewind — not sent", cls: "held" },
-  discarded: { label: "🗑 DISCARDED — never sent", cls: "discarded" },
-  committed: { label: "✓ DELIVERED", cls: "delivered" },
+  staged: { label: "HELD — not sent", cls: "held" },
+  discarded: { label: "DISCARDED — never sent", cls: "discarded" },
+  committed: { label: "DELIVERED", cls: "delivered" },
 };
+
+function clock(iso) {
+  return new Date(iso).toLocaleTimeString([], { hour12: false });
+}
 
 export default function SlackPanel({ tree }) {
   const messages = (tree?.effects || [])
@@ -16,25 +20,29 @@ export default function SlackPanel({ tree }) {
   return (
     <div className="panel slack-panel">
       <div className="panel-caption">
-        <span className="caption-title"># incident-bridge</span>
-        <span className="caption-sub">
-          {held > 0 ? `${held} message${held === 1 ? "" : "s"} held in staging` : "external side effects"}
-        </span>
+        <div>
+          <span className="caption-title">#incident-bridge</span>
+          <span className="caption-sub">
+            outbound Slack, via the staging proxy
+            {held > 0 ? ` — ${held} held` : ""}
+          </span>
+        </div>
       </div>
       <div className="slack-scroll">
         {messages.length === 0 && (
           <div className="hint-text pad">
-            When the agent tries to post to Slack, the message lands here — staged, not sent.
+            When the agent posts to Slack, the message lands here first — staged, not sent.
           </div>
         )}
         {messages.map((m) => {
           const meta = STATUS_META[m.status] || STATUS_META.staged;
           return (
             <div key={m.id} className={`slack-msg ${meta.cls}`}>
-              <div className="slack-avatar">🤖</div>
+              <div className="slack-avatar">SA</div>
               <div className="slack-body">
                 <div className="slack-meta">
                   <span className="slack-author">sre-agent</span>
+                  <span className="slack-time mono">{clock(m.created_at)}</span>
                   <span className={`slack-status ${meta.cls}`}>{meta.label}</span>
                 </div>
                 <div className="slack-text">{m.payload?.text}</div>
@@ -44,9 +52,8 @@ export default function SlackPanel({ tree }) {
         })}
       </div>
       <div className="explainer">
-        You can't un-send a Slack message — so the agent never sends directly. Staged messages
-        only fire when their checkpoint survives; a rewind discards them before the real world
-        ever sees them.
+        A sent message can't be unsent — so the agent never posts directly. Staged messages fire
+        only when their checkpoint survives; a rewind discards them before Slack ever sees them.
       </div>
     </div>
   );

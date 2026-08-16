@@ -41,8 +41,13 @@ export default function TreeGraph({ tree, states, selectedId, onSelect }) {
     >
       {branches.map((b, i) => (
         <g key={b.id}>
-          <text x={14} y={Y0 + i * Y_LANE - 6} className={`lane-label ${b.status}`}>
-            {b.status === "abandoned" ? "✕ " : "● "}
+          <circle
+            cx={18}
+            cy={Y0 + i * Y_LANE - 10}
+            r={4}
+            fill={b.status === "abandoned" ? "var(--grey)" : "var(--green)"}
+          />
+          <text x={28} y={Y0 + i * Y_LANE - 6} className={`lane-label ${b.status}`}>
             {b.name}
           </text>
           <text x={14} y={Y0 + i * Y_LANE + 8} className="lane-sub">
